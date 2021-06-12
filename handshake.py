@@ -1,8 +1,11 @@
 from scapy.all import *
 from scapy.layers.inet import TCP, IP
-
+from scapy.fields import XByteField, XShortField, StrLenField, ByteEnumField, \
+    BitFieldLenField, ByteField, ConditionalField, EnumField, FieldListField, \
+    ShortField, StrFixedLenField, XShortEnumField
 # Defining the script variables
 from smod_eugene.System.Core.Modbus import ModbusADU, ModbusPDU01_Read_Coils, ModbusPDU05_Write_Single_Coil
+import scapy.contrib.modbus as mb
 
 srcIP = '192.168.110.1'
 srcPort = random.randint(1024, 65535)
@@ -70,43 +73,89 @@ def endConnection():
 def connectedSend(pkt):
     # Update packet's sequence and acknowledge numbers
     # before sending
-    pkt[TCP].flags = 'PA'
+    pkt[TCP].flags = 'PA'  # setting up the packet that basically would be accepted by the slave
     pkt[TCP].seq = seqNr
     pkt[TCP].ack = ackNr
     send(pkt)
 
-# First we establish a connection. The packet returned by the
-# function contains the connection parameters
-ConnectionPkt = tcpHandshake()
 
-# With the connection packet as a base, create a Modbus
-# request packet to read coils
-ModbusWritePkt = ConnectionPkt/ModbusADU()/ModbusPDU05_Write_Single_Coil()
-
-# Set the function code, start and stop registers and define
-# the Unit ID
+def write_coil(ConnectionPkt):
+    ModbusWritePkt = ConnectionPkt / ModbusADU() / ModbusPDU05_Write_Single_Coil() # stacking layers for modbus
+    ModbusWritePkt[ModbusPDU05_Write_Single_Coil].unitId = 1
+    ModbusWritePkt[ModbusPDU05_Write_Single_Coil].funcCode = 5
+    ModbusWritePkt[ModbusADU].transId = transID + 1 * 3
+    return ModbusWritePkt
 
 
-ModbusWritePkt[ModbusPDU05_Write_Single_Coil].funcCode = 5
-ModbusWritePkt[ModbusPDU05_Write_Single_Coil].unitId = 1
-ModbusWritePkt[ModbusPDU05_Write_Single_Coil].outputAddr = 0x6
-ModbusWritePkt[ModbusPDU05_Write_Single_Coil].outputValue = 0xff00
+def read_coils(ConnectionPkt):
+    ModbusReadPkt = ConnectionPkt / ModbusADU() / ModbusPDU01_Read_Coils()  # stacking layers for modbus
+    ModbusReadPkt[ModbusPDU01_Read_Coils].unitId = 1
+    ModbusReadPkt[ModbusPDU01_Read_Coils].startAddr = 1
+    ModbusReadPkt[ModbusADU].transId = transID + 1 * 3
+    ModbusReadPkt[ModbusPDU01_Read_Coils].funcCode = 1
+    return ModbusReadPkt
 
-# As an example, send the Modbus packet 5 times, updating
-# the transaction ID for each iteration
-# for i in range(1, 6):
-    # Create a unique transaction ID
-ModbusWritePkt[ModbusADU].transId = transID + 1 * 3
-    # ModbusPkt[ModbusPDU01_Read_Coils].startAddr = random.randint(0, 65535)
 
-    # Send the packet
-connectedSend(ModbusWritePkt)
+def main():
+    ConnectionPkt = tcpHandshake() # Establish three way handshake with the slave first
+    print("connected")
+    while True:
+        action = input("User action: 1 for read coils, 2 for write coil, 3 to exit:")
+        if action == "1":
+            read_packet = read_coils(ConnectionPkt)
+            quantity = input("Quantity to read coils:")
+            read_packet[ModbusPDU01_Read_Coils].quantity = int(quantity)
+            connectedSend(read_packet)
+            # read_results = sniff(count=2, filter='tcp src port 502',
+            #                     iface="VMware Virtual Ethernet Adapter for VMnet1")
+            Results = sniff(count=1, filter='tcp[tcpflags] & (tcp-push|tcp-ack) != 0',
+                            iface="VMware Virtual Ethernet Adapter for VMnet1")
+            ResponsePkt = Results[0]
+            updateSeqAndAckNrs(read_packet, ResponsePkt)
+            sendAck()
+            data = ResponsePkt[Raw].load
+            print(data)
 
-    # Wait for response packets and filter out the Modbus response packet
-Results = sniff(count=1, filter='tcp[tcpflags] & (tcp-push|tcp-ack) != 0')
-ResponsePkt = Results[0]
-updateSeqAndAckNrs(ModbusWritePkt, ResponsePkt)
-ResponsePkt.show()
-sendAck()
+        if action == "2":
+            write_packet = write_coil(ConnectionPkt)
+            Output_addr = input("Enter coil number:")
+            write_packet[ModbusPDU05_Write_Single_Coil].outputAddr = int(Output_addr) - 1
+            status = input("Turn on or off:")
+            if status == "on":
+                write_packet[ModbusPDU05_Write_Single_Coil].outputValue = 0xff00
+            elif status == "off":
+                write_packet[ModbusPDU05_Write_Single_Coil].outputValue = 0x00
+            connectedSend(write_packet)
 
-endConnection()
+            Results = sniff(count=1, filter='tcp[tcpflags] & (tcp-push|tcp-ack) != 0',
+                            iface="VMware Virtual Ethernet Adapter for VMnet1")
+            ResponsePkt = Results[0]
+            updateSeqAndAckNrs(write_packet, ResponsePkt)
+
+            sendAck()
+        elif action == "3":
+            endConnection()
+            break
+
+        # With the connection packet as a base, create a Modbus
+        # request packet to write coils
+
+        # Set the function code, start and stop registers and define
+        # the Unit ID
+            # Wait for response packets and filter out the Modbus response packet
+        # Results = sniff(count=1, filter='tcp[tcpflags] & (tcp-push|tcp-ack) != 0',
+        #                 iface="VMware Virtual Ethernet Adapter for VMnet1")
+        # # Results = sniff(count=1, filter="tcp port 502")
+        # # for packet in Results:
+        # #     print(packet.show())
+        # ResponsePkt = Results[0]
+        # updateSeqAndAckNrs(write_coil(ConnectionPkt), ResponsePkt)
+        #
+        # ResponsePkt.show()
+        # sendAck()
+
+        # endConnection()
+
+
+if __name__ == "__main__":
+    main()
