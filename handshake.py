@@ -4,7 +4,8 @@ from scapy.fields import XByteField, XShortField, StrLenField, ByteEnumField, \
     BitFieldLenField, ByteField, ConditionalField, EnumField, FieldListField, \
     ShortField, StrFixedLenField, XShortEnumField
 # Defining the script variables
-from smod_eugene.System.Core.Modbus import ModbusADU, ModbusPDU01_Read_Coils, ModbusPDU05_Write_Single_Coil
+from smod_eugene.System.Core.Modbus import ModbusADU, ModbusPDU01_Read_Coils, ModbusPDU05_Write_Single_Coil, \
+    ModbusPDU02_Read_Discrete_Inputs
 import scapy.contrib.modbus as mb
 
 srcIP = '192.168.110.1'
@@ -81,18 +82,18 @@ def connectedSend(pkt):
 
 def write_coil(ConnectionPkt):
     ModbusWritePkt = ConnectionPkt / ModbusADU() / ModbusPDU05_Write_Single_Coil() # stacking layers for modbus
-    ModbusWritePkt[ModbusPDU05_Write_Single_Coil].unitId = 1
+    ModbusWritePkt[ModbusADU].unitId = 1
     ModbusWritePkt[ModbusPDU05_Write_Single_Coil].funcCode = 5
     ModbusWritePkt[ModbusADU].transId = transID + 1 * 3
     return ModbusWritePkt
 
 
 def read_coils(ConnectionPkt):
-    ModbusReadPkt = ConnectionPkt / ModbusADU() / ModbusPDU01_Read_Coils()  # stacking layers for modbus
-    ModbusReadPkt[ModbusPDU01_Read_Coils].unitId = 1
-    ModbusReadPkt[ModbusPDU01_Read_Coils].startAddr = 1
-    ModbusReadPkt[ModbusADU].transId = transID + 1 * 3
-    ModbusReadPkt[ModbusPDU01_Read_Coils].funcCode = 1
+    ModbusReadPkt = ConnectionPkt / ModbusADU() / ModbusPDU02_Read_Discrete_Inputs()  # stacking layers for modbus
+    ModbusReadPkt[ModbusADU].unitId = 1
+    ModbusReadPkt[ModbusPDU02_Read_Discrete_Inputs].quantity = 1
+    ModbusReadPkt[ModbusADU].transId = transID + 1 * 3 + 3
+    ModbusReadPkt[ModbusPDU02_Read_Discrete_Inputs].funcCode = 2
     return ModbusReadPkt
 
 
@@ -103,8 +104,8 @@ def main():
         action = input("User action: 1 for read coils, 2 for write coil, 3 to exit:")
         if action == "1":
             read_packet = read_coils(ConnectionPkt)
-            quantity = input("Quantity to read coils:")
-            read_packet[ModbusPDU01_Read_Coils].quantity = int(quantity)
+            start_addr = input("Coil to read")
+            read_packet[ModbusPDU02_Read_Discrete_Inputs].startAddr = int(start_addr)
             connectedSend(read_packet)
             # read_results = sniff(count=2, filter='tcp src port 502',
             #                     iface="VMware Virtual Ethernet Adapter for VMnet1")
