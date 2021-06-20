@@ -1,17 +1,15 @@
 from scapy.all import *
 from scapy.layers.inet import TCP, IP
-from scapy.fields import XByteField, XShortField, StrLenField, ByteEnumField, \
-    BitFieldLenField, ByteField, ConditionalField, EnumField, FieldListField, \
-    ShortField, StrFixedLenField, XShortEnumField
-# Defining the script variables
+
 from smod_eugene.System.Core.Modbus import ModbusADU, ModbusPDU01_Read_Coils, ModbusPDU05_Write_Single_Coil, \
     ModbusPDU02_Read_Discrete_Inputs
 import scapy.contrib.modbus as mb
 
+# Declaring variables needed to establish connection
 srcIP = '192.168.110.1'
 srcPort = random.randint(1024, 65535)
 dstIP = '192.168.110.128'
-dstPort = 502
+dstPort = 502  # specific port needed for modbus
 seqNr = random.randint(444, 8765432)
 ackNr = 0
 transID = random.randint(44, 44444)
@@ -19,12 +17,13 @@ transID = random.randint(44, 44444)
 
 def updateSeqAndAckNrs(sendPkt, recvdPkt):
     # Keeping track of tcp sequence and acknowledge numbers
-    global seqNr
+    global seqNr # using global variables
     global ackNr
     seqNr = seqNr + len(sendPkt[TCP].payload)
     ackNr = ackNr + len(recvdPkt[TCP].payload)
 
 
+# Function that send an ack every time it receives a response from the slave
 def sendAck():
     # Create the acknowledge packet
     ip = IP(src=srcIP, dst=dstIP)
@@ -35,9 +34,9 @@ def sendAck():
     # Send acknowledge packet
     send(pktACK)
 
+
 def tcpHandshake():
-    # Establish a connection with the server by means of the tcp
-    # three-way handshake
+    # Establish a connection with the server by means of the tcp three-way handshake
     # Note: linux might send an RST for forged SYN packets.Disable it by executing:
     # > iptables -A OUTPUT -p tcp --tcp-flags RST RST -s <src_ip> -j DROP
     global seqNr
@@ -50,7 +49,7 @@ def tcpHandshake():
     pktSYN = ip / SYN
 
     # send SYN packet and receive SYN/ACK packet
-    pktSYNACK = sr1(pktSYN)
+    pktSYNACK = sr1(pktSYN, timeout=10)
 
     # Create the ACK packet
     ackNr = pktSYNACK.seq + 1
@@ -60,6 +59,7 @@ def tcpHandshake():
     return ip/ACK
 
 
+# Function to end the connection
 def endConnection():
     # Create the rst packet
     ip = IP(src=srcIP, dst=dstIP)
@@ -79,7 +79,7 @@ def connectedSend(pkt):
     pkt[TCP].ack = ackNr
     send(pkt)
 
-
+# Function that creates the write packet with parameters needed
 def write_coil(ConnectionPkt):
     ModbusWritePkt = ConnectionPkt / ModbusADU() / ModbusPDU05_Write_Single_Coil() # stacking layers for modbus
     ModbusWritePkt[ModbusADU].unitId = 1
@@ -88,6 +88,7 @@ def write_coil(ConnectionPkt):
     return ModbusWritePkt
 
 
+# Function that creates the read packet with parameters needed
 def read_coils(ConnectionPkt):
     ModbusReadPkt = ConnectionPkt / ModbusADU() / ModbusPDU02_Read_Discrete_Inputs()  # stacking layers for modbus
     ModbusReadPkt[ModbusADU].unitId = 1
@@ -104,11 +105,12 @@ def main():
         action = input("User action: 1 for read coils, 2 for write coil, 3 to exit:")
         if action == "1":
             read_packet = read_coils(ConnectionPkt)
-            start_addr = input("Coil to read")
+            start_addr = input("Coil to read:")
             read_packet[ModbusPDU02_Read_Discrete_Inputs].startAddr = int(start_addr)
             connectedSend(read_packet)
-            # read_results = sniff(count=2, filter='tcp src port 502',
-            #                     iface="VMware Virtual Ethernet Adapter for VMnet1")
+
+            # Wait for response packets and filter out the Modbus response packet
+
             Results = sniff(count=1, filter='tcp[tcpflags] & (tcp-push|tcp-ack) != 0',
                             iface="VMware Virtual Ethernet Adapter for VMnet1")
             ResponsePkt = Results[0]
@@ -118,6 +120,10 @@ def main():
             print(data)
 
         if action == "2":
+
+            # With the connection packet as a base, create a Modbus
+            # request packet to write coils
+
             write_packet = write_coil(ConnectionPkt)
             Output_addr = input("Enter coil number:")
             write_packet[ModbusPDU05_Write_Single_Coil].outputAddr = int(Output_addr) - 1
@@ -138,8 +144,7 @@ def main():
             endConnection()
             break
 
-        # With the connection packet as a base, create a Modbus
-        # request packet to write coils
+
 
         # Set the function code, start and stop registers and define
         # the Unit ID
