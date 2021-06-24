@@ -6,9 +6,9 @@ from smod_eugene.System.Core.Modbus import ModbusADU, ModbusPDU01_Read_Coils, Mo
 import scapy.contrib.modbus as mb
 
 # Declaring variables needed to establish connection
-srcIP = '192.168.110.1'
+srcIP = input('input source/spoofed IP:')
 srcPort = random.randint(1024, 65535)
-dstIP = '192.168.110.128'
+dstIP = input('input destination/spoofed IP:')
 dstPort = 502  # specific port needed for modbus
 seqNr = random.randint(444, 8765432)
 ackNr = 0
